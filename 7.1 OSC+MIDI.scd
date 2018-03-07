@@ -72,10 +72,11 @@ OSCFunc.trace(false)
 
 (
 // the first three arguments of OSCdef.new are the most commonly used, the rest limit the response to matching sender, receiver-port, message-mapping, and dispatches to multiple responder functions
-OSCdef.new (key, func, path, srcID, recvPort, argTemplate, dispatcher)
+// OSCdef.new (key, func, path, srcID, recvPort, argTemplate, dispatcher)
 // register to trigger a response to a message
 OSCdef(\test,  // this is the 'key' -- a symbol-name identifying this response to every message received by its OSC-address
 	{ arg msg, time, addr, recvPort;  // this is the responder function
+		msg.postln;
 		"received trigger!".postln; },
 		"/tr"   // this is the osc-address 'path'
 );
@@ -201,8 +202,12 @@ MIDIdef.noteOff(\testOff,{ arg vel,note;
 },nil,0) // also specify note, chan
 .fix(true);
 MIDIdef.cc(\testCC,{ arg val, num, chan;  // this is the vector for controller events
+	var ~synthsOn;
 	switch(num.postln,	// save cmratios and indexes
-		32,{ ~cmRatio1=([0.1,20,\lin,0.1].asSpec.map(val/127))},
+		32,{ ~cmRatio1=([0.1,20,\lin,0.1].asSpec.map(val/127));
+			~synthsOn= ~synths.select({|num| ~synths[num].notNil });
+			if(~synths[num].notNil,{~synths[num].set(\cmRatio1,~cmRatio1)})
+		},
 		33,{ ~index1=([0.1,20,\lin,0.1].asSpec.map(val/127)) },
 		34,{ ~cmRatio2=([0.1,20,\lin,0.1].asSpec.map(val/127)) },
 	35,{ ~index2=([0.1,20,\lin,0.1].asSpec.map(val/127))}
@@ -220,6 +225,83 @@ MIDIdef.cc(\effCC,{ arg val, num, chan;  // this is the vector for controller ev
 	)}).fix;
 
 MIDIdef.freeAll;   // clear all MIDIdefs
+
+/* the following code shows how to use a MIDI input to control a GUI slider which is
+is itself setting the parameters of a synth -- in SuperCollider, audio functions are scheduled
+using the SystemClock, which has the highest priority for execution timing -- MIDI input is also handled
+with  that same priority -- graphics are inherently slower because more data is required for each frame,
+and the hardware interface is more complex --  so graphicsfunctions are scheduled using the AppClock
+which has a lower priority -- when you use MIDI input to control a GUI slider, it must therefore be scheduled
+with the AppClock, and this is done using Function-defer */
+
+{ /* move the GUI slider, which executes its action function */  }.defer   // 'defer' means schedule using the AppClock
+
+// ANY changes in graphics that are initiated by receiving a MIDI message must be similarly 'defer'ed
+
+(
+// use this example as a template when using a Slider
+var w, carfreqslider, modfreqslider, moddepthslider, synth;
+// define ControlSpecs that scale values of sliders to appropriate ranges
+var carfreqSpec = ControlSpec(20, 5000, 'exponential', 10, 440);
+var modfreqSpec = ControlSpec(1, 5000, 'exponential', 1, 1);
+var moddepthSpec = ControlSpec(0.01, 5000, 'exponential', 0.01, 0.01);
+
+synth= {arg carfreq=440, modfreq=1, moddepth=0.01;
+	SinOsc.ar(carfreq + (moddepth*SinOsc.ar(modfreq)),0,0.25)
+}.play;
+
+f = FlowView.new(windowTitle: "FM example");  // a window that automatically places GUI widgets for you
+
+carfreqslider=Slider(f,40@400).action_({arg sl; synth.set(\carfreq, carfreqSpec.map(sl.value)) });  // give each slider an action function, that sets the synth arguments to its current value
+
+modfreqslider= Slider(f,40@400).action_({arg sl; synth.set(\modfreq, modfreqSpec.map(sl.value)) });
+
+moddepthslider= Slider(f,40@400).action_({arg sl; synth.set(\moddepth, moddepthSpec.map(sl.value)) });
+
+MIDIIn.connectAll;
+
+MIDIdef.cc(\guiCtl,{ arg val, num, chan;
+	switch(num.postln,	// 'switch' matches a value with an appropriate response
+		30,{ { carfreqslider.valueAction_(val/127) }.defer },
+		31,{ { modfreqslider.valueAction_(val/127) }.defer },
+		32,{ { moddepthslider.valueAction_(val/127) }.defer })}).fix(true);
+
+f.parent.onClose_({ synth.free })  // end the synth when window closes
+)
+
+
+(// use this example as a template when using an EZSlider
+var w, carfreqslider, modfreqslider, modindexslider, synth;
+
+// below is the equivalent of the shortcut FlowView class -- it can provide more design control when you want it
+w=Window("FM via mod index", Rect(100, 400, 400, 300));
+w.view.decorator = FlowLayout(w.view.bounds);
+
+synth= {arg carfreq=440, modfreq=1, modindex=0.01;
+	PMOsc.ar(carfreq, modfreq,modindex,0,0.25)
+}.play;
+
+carfreqslider= EZSlider(w, 300@50, "carfreq", ControlSpec(20, 5000, 'exponential', 10, 440), {|ez|  synth.set(\carfreq, ez.value)});
+~cs = carfreqslider;
+w.view.decorator.nextLine;
+
+modfreqslider= EZSlider(w, 300@50, "modfreq", ControlSpec(1, 5000, 'exponential', 1, 1), {|ez|  synth.set(\modfreq, ez.value)});
+w.view.decorator.nextLine;
+
+modindexslider= EZSlider(w, 300@50, "modindex", ControlSpec(0.0, 40, 'linear', 0.01, 0.0), {|ez|  synth.set(\modindex, ez.value)});
+
+MIDIIn.connectAll;
+MIDIdef.cc(\guiCtl,{ arg val, num, chan;
+	switch(num.postln,	// 'switch' matches a value with an appropriate response
+		30,{ { carfreqslider.valueAction_(carfreqslider.controlSpec.map(val/127)) }.defer },
+		31,{ { modfreqslider.valueAction_(modfreqslider.controlSpec.map(val/127)) }.defer },
+		32,{ { modindexslider.valueAction_(modindexslider.controlSpec.map(val/127)) }.defer })
+}).fix(true);
+
+w.front.onClose_({ synth.free });
+)
+
+
 
 
 
