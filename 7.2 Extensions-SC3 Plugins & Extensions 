@@ -1,0 +1,30 @@
+// Extensions, SC3-Plugins and Quarks
+
+// SC3 Plugins and Extensions
+(
+// Plugins are UGens written by other users, that run audio on the Server.  They are written in C++, so you must download the appropriate compilations for Mac or Windows, or build them from sourcecode in Linux.  On Mac, put the downloaded files in your /User/Library/Application Support/SuperCollider/Extensions folder, then recompile. (On Windows, you should be able to find a similar "SuperCollider/Extensions" folder.)
+
+// Extensions are class libraries written by other users in the SuperCollider language -- they are therefore cross-platform, so you need only the source code. These are available in a package-management system called Quarks, which you can read about in the [UsingQuarks] helpfile.  But briefly, they can be automatically downloaded and installed in your compilation path by typing
+
+Quarks.gui
+
+// which brings up a selection panel.  Choose a library to install then recompile, and a link to the chosen quarks code is created in your /User/Library/Application Support/SuperCollider/Extensions/quarks folder.  If you have trouble with Quarks.gui you can download and install them manually, by putting them in a Quarks folder and moving it into the /User/Library/Application Support/SuperCollider folder.
+
+// CV (Control-Value) is a Quark that associates data with a ControlSpec
+// it also allows flexible connection to GUI objects
+
+var dly = {|dlyTime=1,dcyTime=5,dlyAmp=0.25|
+	CombC.ar(SoundIn.ar(0,dlyAmp),2,dlyTime,dcyTime) }.play;
+~dlyTime = CV([0.05,2.0,\exp,0].asSpec,1.0);
+~dlyTime.action_({|cv| dly.set(\dlyTime,cv.value)});
+~dcyTime = CV([0.1,40,\exp,0].asSpec,5);
+~dcyTime.action_({|cv| dly.set(\dcyTime,cv.value)});
+~dlyAmp = CV(nil,0.25);
+~dlyAmp.action_({|cv| dly.set(\dlyAmp,cv.value)});
+
+w = Window("dlyTest",Rect(25, 392, 690, 150)).front.onClose_({ dly.free });
+f = FlowView.new(w, margin: 5@5);
+~dlyTime.connect(EZSlider(f,220@20,"dlyTime",[0.05,2.0,\exp].asSpec));
+~dcyTime.connect(EZSlider(f,220@20,"dcyTime",[0.01,20,\exp,0].asSpec));
+~dlyAmp.connect(EZSlider(f,220@20,"dlyAmp",nil));
+)
